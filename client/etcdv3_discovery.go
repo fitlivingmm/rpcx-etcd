@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rpcxio/rpcx-etcd/serverplugin"
+
 	"github.com/rpcxio/libkv"
 	"github.com/rpcxio/libkv/store"
 	estore "github.com/rpcxio/rpcx-etcd/store"
@@ -60,48 +62,32 @@ func NewEtcdV3DiscoveryStore(basePath string, kv store.Store, allowKeyNotFound b
 	d := &EtcdV3Discovery{basePath: basePath, kv: kv}
 	d.stopCh = make(chan struct{})
 
-	ps, err := kv.List(basePath)
+	pairs := make([]*client.KVPair, 0)
+	baseKey := serverplugin.ServiceNamespace()
+	urlKVPair, err := d.kv.List(baseKey)
 	if err != nil {
 		if !allowKeyNotFound || err != store.ErrKeyNotFound {
-			log.Errorf("cannot get services of from registry: %v, err: %v", basePath, err)
-			return nil, err
+			log.Errorf("cannot get services of from registry: %v, err: %v", baseKey, err)
+			// no find register
+			//return nil, err
 		}
 	}
-	pairs := make([]*client.KVPair, 0, len(ps))
-	var prefix string
-	for _, p := range ps {
-		if prefix == "" {
-			if strings.HasPrefix(p.Key, "/") {
-				if strings.HasPrefix(d.basePath, "/") {
-					prefix = d.basePath + "/"
-				} else {
-					prefix = "/" + d.basePath + "/"
-				}
-			} else {
-				if strings.HasPrefix(d.basePath, "/") {
-					prefix = d.basePath[1:] + "/"
-				} else {
-					prefix = d.basePath + "/"
-				}
-			}
+	for _, info := range urlKVPair {
+		temp := &client.KVPair{
+			Key:   info.Key,
+			Value: string(info.Value),
 		}
-		if p.Key == prefix[:len(prefix)-1] || !strings.HasPrefix(p.Key, prefix) {
-			continue
-		}
-		k := strings.TrimPrefix(p.Key, prefix)
-		pair := &client.KVPair{Key: k, Value: string(p.Value)}
-		if d.filter != nil && !d.filter(pair) {
-			continue
-		}
-		pairs = append(pairs, pair)
+		pairs = append(pairs, temp)
 	}
+
 	d.pairsMu.Lock()
 	d.pairs = pairs
 	d.pairsMu.Unlock()
 	d.RetriesAfterWatchFailed = -1
 	d.AllowKeyNotFound = allowKeyNotFound
 
-	go d.watch()
+	//go d.watch()
+	go d.watchUrl()
 	return d, nil
 }
 
@@ -166,6 +152,51 @@ func (d *EtcdV3Discovery) RemoveWatcher(ch chan []*client.KVPair) {
 	}
 
 	d.chans = chans
+}
+
+func (d *EtcdV3Discovery) watchUrl() {
+	var ev3 *etcd.EtcdV3
+	var ok bool
+	if ev3, ok = d.kv.(*etcd.EtcdV3); !ok {
+		return
+	}
+
+	//urlChans
+	key := serverplugin.ServiceNamespace()
+	watchCh, err := ev3.WatchChange(key, nil)
+	if err != nil {
+		log.Errorf("err:%+v", err)
+	}
+
+	for infos := range watchCh {
+		pairs := make([]*client.KVPair, 0)
+		for _, info := range infos {
+			pInfo := &client.KVPair{
+				Key:   info.Key,
+				Value: string(info.Value),
+				Type:  info.LastIndex,
+			}
+			pairs = append(pairs, pInfo)
+		}
+
+		d.mu.Lock()
+		for _, ch := range d.chans {
+			tempCh := ch
+			go func() {
+				defer func() {
+					recover()
+				}()
+
+				select {
+				case tempCh <- pairs:
+				case <-time.After(time.Minute):
+					log.Warn("chan is full and new change has been dropped")
+				}
+			}()
+		}
+		d.mu.Unlock()
+	}
+
 }
 
 func (d *EtcdV3Discovery) watch() {

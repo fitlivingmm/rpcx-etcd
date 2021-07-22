@@ -16,6 +16,7 @@ import (
 	estore "github.com/rpcxio/rpcx-etcd/store"
 	etcd "github.com/rpcxio/rpcx-etcd/store/etcdv3"
 	"github.com/smallnest/rpcx/log"
+	"github.com/smallnest/rpcx/util"
 )
 
 func init() {
@@ -42,6 +43,9 @@ type EtcdV3RegisterPlugin struct {
 
 	dying chan struct{}
 	done  chan struct{}
+
+	serviceInfo *util.ServiceInfo
+	allApis     []string `json:"uri_paths"`
 }
 
 // Start starts to connect etcd cluster
@@ -53,6 +57,9 @@ func (p *EtcdV3RegisterPlugin) Start() error {
 		p.dying = make(chan struct{})
 	}
 
+	p.allApis = make([]string, 0)
+	p.serviceInfo = &util.ServiceInfo{}
+
 	if p.kv == nil {
 		kv, err := libkv.NewStore(estore.ETCDV3, p.EtcdServers, p.Options)
 		if err != nil {
@@ -62,7 +69,7 @@ func (p *EtcdV3RegisterPlugin) Start() error {
 		p.kv = kv
 	}
 
-	err := p.kv.Put(p.BasePath, []byte("rpcx_path"), &store.WriteOptions{IsDir: true,TTL: p.UpdateInterval + time.Second})
+	err := p.kv.Put(p.BasePath, []byte("rpcx_path"), &store.WriteOptions{IsDir: true, TTL: p.UpdateInterval + time.Second})
 	if err != nil && !strings.Contains(err.Error(), "Not a file") {
 		log.Errorf("cannot create etcd path %s: %v", p.BasePath, err)
 		return err
@@ -140,6 +147,10 @@ func (p *EtcdV3RegisterPlugin) Stop() error {
 		}
 	}
 
+	serviceKey := util.CreateServiceKey(p.ServiceAddress)
+	log.Infof("Stop serviceKey:%+v", serviceKey)
+	p.kv.Delete(serviceKey)
+
 	close(p.dying)
 	<-p.done
 	return nil
@@ -211,6 +222,7 @@ func (p *EtcdV3RegisterPlugin) Register(name string, rcvr interface{}, metadata 
 }
 
 func (p *EtcdV3RegisterPlugin) RegisterFunction(serviceName, fname string, fn interface{}, metadata string) error {
+	p.allApis = append(p.allApis, fname)
 	return p.Register(serviceName, fn, metadata)
 }
 
@@ -272,4 +284,21 @@ func (p *EtcdV3RegisterPlugin) Unregister(name string) (err error) {
 	delete(p.metas, name)
 	p.metasLock.Unlock()
 	return
+}
+
+// StartRegisterUrls starts to connect etcd cluster
+func (p *EtcdV3RegisterPlugin) StartRegisterUrls() error {
+	for _, api := range p.allApis {
+		p.serviceInfo.Append(api)
+	}
+
+	info := p.serviceInfo.String()
+	serviceKey := util.CreateServiceKey(p.ServiceAddress)
+
+	err := p.kv.Put(serviceKey, []byte(info), &store.WriteOptions{TTL: p.UpdateInterval * 2})
+	if err != nil {
+		log.Errorf("cannot create etcd path %s, %s.err: %v", serviceKey, info, err)
+		return err
+	}
+	return nil
 }

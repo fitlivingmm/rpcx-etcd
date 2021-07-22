@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/smallnest/rpcx/log"
+
 	"github.com/rpcxio/libkv"
 	"github.com/rpcxio/libkv/store"
 	estore "github.com/rpcxio/rpcx-etcd/store"
@@ -457,4 +459,38 @@ func (s *EtcdV3) AtomicDelete(key string, previous *store.KVPair) (bool, error) 
 func (s *EtcdV3) Close() {
 	close(s.done)
 	s.client.Close()
+}
+
+// WatchChange watches for changes on child nodes under
+func (s *EtcdV3) WatchChange(directory string, stopCh <-chan struct{}) (chan []*store.KVPair, error) {
+	watchCh := make(chan []*store.KVPair)
+	go func() {
+		defer close(watchCh)
+	rematch:
+		rch := s.client.Watch(context.Background(), directory, clientv3.WithPrefix())
+		for {
+			select {
+			case <-s.done:
+				return
+			case watchInfo := <-rch:
+				if watchInfo.Canceled {
+					log.Warnf("watch exit. canceled:%+v, err:+%v", watchInfo.Canceled, watchInfo.Err())
+					goto rematch
+				}
+				list := make([]*store.KVPair, 0)
+				for _, ev := range watchInfo.Events {
+					log.Infof("%s: %s %q : %q\n", directory, ev.Type, ev.Kv.Key, ev.Kv.Value)
+					info := &store.KVPair{
+						Key:       string(ev.Kv.Key),
+						Value:     ev.Kv.Value,
+						LastIndex: uint64(ev.Type),
+					}
+					list = append(list, info)
+				}
+				watchCh <- list
+			}
+		}
+	}()
+
+	return watchCh, nil
 }
