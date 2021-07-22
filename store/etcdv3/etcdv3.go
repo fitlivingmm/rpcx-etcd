@@ -7,11 +7,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/smallnest/rpcx/log"
+	"github.com/fitlivingmm/rpcx/log"
 
+	estore "github.com/fitlivingmm/rpcx-etcd/store"
 	"github.com/rpcxio/libkv"
 	"github.com/rpcxio/libkv/store"
-	estore "github.com/rpcxio/rpcx-etcd/store"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/client/v3/concurrency"
 )

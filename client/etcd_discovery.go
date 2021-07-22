@@ -5,12 +5,12 @@ import (
 	"sync"
 	"time"
 
+	estore "github.com/fitlivingmm/rpcx-etcd/store"
+	"github.com/fitlivingmm/rpcx-etcd/store/etcd"
+	"github.com/fitlivingmm/rpcx/client"
+	"github.com/fitlivingmm/rpcx/log"
 	"github.com/rpcxio/libkv"
 	"github.com/rpcxio/libkv/store"
-	estore "github.com/rpcxio/rpcx-etcd/store"
-	"github.com/rpcxio/rpcx-etcd/store/etcd"
-	"github.com/smallnest/rpcx/client"
-	"github.com/smallnest/rpcx/log"
 )
 
 func init() {
