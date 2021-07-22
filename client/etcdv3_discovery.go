@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fitlivingmm/rpcx-etcd/serverplugin"
+	"github.com/fitlivingmm/rpcx/util"
 
 	estore "github.com/fitlivingmm/rpcx-etcd/store"
 	etcd "github.com/fitlivingmm/rpcx-etcd/store/etcdv3"
@@ -63,7 +63,7 @@ func NewEtcdV3DiscoveryStore(basePath string, kv store.Store, allowKeyNotFound b
 	d.stopCh = make(chan struct{})
 
 	pairs := make([]*client.KVPair, 0)
-	baseKey := serverplugin.ServiceNamespace()
+	baseKey := util.ServiceNamespace()
 	urlKVPair, err := d.kv.List(baseKey)
 	if err != nil {
 		if !allowKeyNotFound || err != store.ErrKeyNotFound {
@@ -162,7 +162,7 @@ func (d *EtcdV3Discovery) watchUrl() {
 	}
 
 	//urlChans
-	key := serverplugin.ServiceNamespace()
+	key := util.ServiceNamespace()
 	watchCh, err := ev3.WatchChange(key, nil)
 	if err != nil {
 		log.Errorf("err:%+v", err)
